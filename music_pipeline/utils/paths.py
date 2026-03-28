@@ -9,12 +9,27 @@ from music_pipeline.models import TrackTags
 # Characters not allowed in filenames
 INVALID_CHARS = re.compile(r'[<>:"/\\|?*]')
 
+# Separators that introduce collaborators/features in artist strings
+_COLLABORATOR_SPLIT = re.compile(
+    r'\s+(?:feat\.?|ft\.?|featuring|vs\.?|&|and|x)\s+.*',
+    flags=re.IGNORECASE,
+)
+
 
 def sanitize_filename(name: str) -> str:
     """Remove or replace characters that are invalid in filenames."""
     sanitized = INVALID_CHARS.sub("", name)
     sanitized = sanitized.strip(". ")
     return sanitized if sanitized else "unknown"
+
+
+def extract_primary_artist(album_artist: str) -> str:
+    """Strip collaborators/features from an album_artist string, returning only the primary artist.
+
+    e.g. "Artist ft Other" -> "Artist"
+         "Artist A & Artist B" -> "Artist A"
+    """
+    return _COLLABORATOR_SPLIT.sub("", album_artist).strip()
 
 
 def build_new_filename(tags: TrackTags, extension: str) -> str:

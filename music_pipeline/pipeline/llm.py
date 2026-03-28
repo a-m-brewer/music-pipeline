@@ -18,7 +18,7 @@ You specialize in electronic music, DJ culture, and obscure tracks that may not 
 
 Always respond with valid JSON matching the specified schema. Be conservative with confidence scores — only rate highly when multiple sources agree or you have strong evidence.
 
-For artist tagging: `artist` holds full performing credits (e.g. "Artist A & Artist B", "Artist A feat. Artist B"). `album_artist` holds only the single primary/lead artist and is used for folder organisation — never include collaborators or features here."""
+For artist tagging: `artist` holds full performing credits using comma-separated format only (e.g. "Artist A, Artist B, Artist C"), with the most prominent artist first. Never use "feat.", "ft.", "&", "x", "vs", "with", or any other separator — always commas only. `album_artist` holds only the single primary/lead artist and is used for folder organisation — never include collaborators or features here."""
 
 USER_PROMPT_TEMPLATE = """Identify this audio file and determine the correct metadata tags.
 
@@ -46,7 +46,7 @@ USER_PROMPT_TEMPLATE = """Identify this audio file and determine the correct met
 Based on ALL available information, determine the most likely correct tags. Cross-reference sources where possible. If sources disagree, explain why you chose one over another.
 
 **Artist field rules (important):**
-- `artist`: full performing credits, including all collaborators (e.g. "Artist A & Artist B", "Artist A feat. Artist B")
+- `artist`: full performing credits, comma-separated, most prominent artist first (e.g. "Artist A, Artist B" or "Artist A, Artist B, Artist C"). Never use "feat.", "ft.", "&", "x", "vs", "with", or any other separator — commas only.
 - `album_artist`: the single primary artist only — used for folder organisation. Never include featured/secondary artists here. If the track has multiple artists, pick the most prominent one.
 
 Respond with ONLY valid JSON (no markdown code fences):

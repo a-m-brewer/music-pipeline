@@ -14,6 +14,7 @@ from music_pipeline.pipeline.musicbrainz import (
 from music_pipeline.pipeline.spotify import search_spotify
 from music_pipeline.state.db import StateDB
 from music_pipeline.tags.reader import parse_filename
+from music_pipeline.utils.paths import extract_primary_artist
 
 
 def identify_track(
@@ -104,6 +105,13 @@ def identify_track(
     result, tokens_used = llm_result
     db.log_api_call("llm", file_id, tokens_used)
 
+    return _normalize_result(result)
+
+
+def _normalize_result(result: IdentificationResult) -> IdentificationResult:
+    """Enforce album_artist = single primary artist only (no features/collaborators)."""
+    if result.tags.album_artist:
+        result.tags.album_artist = extract_primary_artist(result.tags.album_artist)
     return result
 
 
@@ -117,10 +125,10 @@ def _fallback_result(
     # Pick the highest confidence source result
     best = max(source_results, key=lambda r: r.confidence)
 
-    return IdentificationResult(
+    return _normalize_result(IdentificationResult(
         tags=best.tags,
         confidence=int(best.confidence * 100),
         reasoning=f"Fallback: best match from {best.source} (LLM unavailable)",
         sources_used=[best.source],
         source_results=source_results,
-    )
+    ))
