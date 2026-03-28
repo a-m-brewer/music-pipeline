@@ -32,6 +32,16 @@ def _extract_tags(audio) -> TrackTags:
             return val if val.strip() else None
         return None
 
+    def get_genres() -> Optional[str]:
+        frames = audio.tags.getall("TCON")
+        if not frames:
+            return None
+        genres = frames[0].genres
+        if not genres:
+            return None
+        joined = ", ".join(g for g in genres if g.strip())
+        return joined if joined else None
+
     return TrackTags(
         title=get_tag("TIT2"),
         artist=get_tag("TPE1"),
@@ -39,7 +49,7 @@ def _extract_tags(audio) -> TrackTags:
         album_artist=get_tag("TPE2"),
         year=get_tag("TDRC") or get_tag("TYER"),
         track_number=get_tag("TRCK"),
-        genre=get_tag("TCON"),
+        genre=get_genres(),
         comment=get_tag("COMM"),
         composer=get_tag("TCOM"),
         disc_number=get_tag("TPOS"),

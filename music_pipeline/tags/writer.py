@@ -12,6 +12,11 @@ from mutagen.mp4 import MP4Tags
 from music_pipeline.models import TrackTags
 
 
+def _parse_genres(genre_str: str) -> list[str]:
+    """Split a comma-separated genre string into a list of trimmed genre names."""
+    return [g.strip() for g in genre_str.split(",") if g.strip()]
+
+
 def _write_id3_tags(audio, tags: TrackTags) -> bool:
     tag_mapping = [
         ("TIT2", tags.title, TIT2),
@@ -36,7 +41,7 @@ def _write_id3_tags(audio, tags: TrackTags) -> bool:
 
     if tags.genre and tags.genre.strip():
         tcon = TCON()
-        tcon.genres = [tags.genre.strip()]
+        tcon.genres = _parse_genres(tags.genre)
         audio.tags.setall("TCON", [tcon])
 
     if tags.comment and tags.comment.strip():
@@ -75,7 +80,7 @@ def _write_mp4_tags(audio, tags: TrackTags) -> bool:
     if tags.year and tags.year.strip():
         t["\xa9day"] = [tags.year.strip()]
     if tags.genre and tags.genre.strip():
-        t["\xa9gen"] = [tags.genre.strip()]
+        t["\xa9gen"] = _parse_genres(tags.genre)
     if tags.comment and tags.comment.strip():
         t["\xa9cmt"] = [tags.comment.strip()]
     if tags.track_number and tags.track_number.strip():
@@ -98,12 +103,13 @@ def _write_vorbis_tags(audio, tags: TrackTags) -> bool:
         ("TRACKNUMBER", tags.track_number),
         ("DISCNUMBER", tags.disc_number),
         ("DATE", tags.year),
-        ("GENRE", tags.genre),
         ("COMMENT", tags.comment),
     ]
     for key, value in mapping:
         if value and value.strip():
             t[key] = [value.strip()]
+    if tags.genre and tags.genre.strip():
+        t["GENRE"] = _parse_genres(tags.genre)
     return True
 
 
@@ -119,12 +125,13 @@ def _write_asf_tags(audio, tags: TrackTags) -> bool:
         ("WM/TrackNumber", tags.track_number),
         ("WM/PartOfSet", tags.disc_number),
         ("WM/Year", tags.year),
-        ("WM/Genre", tags.genre),
         ("Description", tags.comment),
     ]
     for key, value in mapping:
         if value and value.strip():
             t[key] = [value.strip()]
+    if tags.genre and tags.genre.strip():
+        t["WM/Genre"] = _parse_genres(tags.genre)
     return True
 
 

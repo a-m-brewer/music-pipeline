@@ -57,7 +57,7 @@ Respond with ONLY valid JSON (no markdown code fences):
   "album_artist": "primary artist only (no features/collaborators), or null",
   "year": "release year or null",
   "track_number": "track number or null",
-  "genre": "genre or null",
+  "genre": "primary genre, or comma-separated list for multiple (e.g. \"Electronic, House\"), or null",
   "composer": "composer or null",
   "disc_number": "disc number or null",
   "confidence": 0-100,
