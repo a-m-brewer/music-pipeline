@@ -9,9 +9,11 @@ from music_pipeline.models import TrackTags
 # Characters not allowed in filenames
 INVALID_CHARS = re.compile(r'[<>:"/\\|?*]')
 
-# Separators that introduce collaborators/features in artist strings
+# Separators that introduce collaborators/features in artist strings.
+# Only use unambiguous feature markers — & / and / x are excluded because
+# they appear legitimately in band names (e.g. "Chase & Status").
 _COLLABORATOR_SPLIT = re.compile(
-    r'\s+(?:feat\.?|ft\.?|featuring|vs\.?|&|and|x)\s+.*',
+    r'\s+(?:feat\.?|ft\.?|featuring|vs\.?)\s+.*',
     flags=re.IGNORECASE,
 )
 
@@ -24,10 +26,10 @@ def sanitize_filename(name: str) -> str:
 
 
 def extract_primary_artist(album_artist: str) -> str:
-    """Strip collaborators/features from an album_artist string, returning only the primary artist.
+    """Strip feat./ft./featuring/vs. collaborators from an album_artist string.
 
-    e.g. "Artist ft Other" -> "Artist"
-         "Artist A & Artist B" -> "Artist A"
+    e.g. "Artist feat. Other" -> "Artist"
+         "Chase & Status" -> "Chase & Status"  (& is part of the band name)
     """
     return _COLLABORATOR_SPLIT.sub("", album_artist).strip()
 
@@ -40,8 +42,9 @@ def build_new_filename(tags: TrackTags, extension: str) -> str:
     """
     parts = []
 
-    if tags.track_number and tags.track_number.strip().isdigit():
-        parts.append(f"{int(tags.track_number):02d}")
+    track_number = str(tags.track_number).strip() if tags.track_number is not None else ""
+    if track_number.isdigit():
+        parts.append(f"{int(track_number):02d}")
 
     if tags.title:
         parts.append(tags.title.strip())

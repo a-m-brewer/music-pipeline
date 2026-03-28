@@ -55,6 +55,15 @@ def search_spotify(
     try:
         response = sp.search(q=query, type="track", limit=5)
     except Exception as e:
+        try:
+            from spotipy.exceptions import SpotifyException
+            if isinstance(e, SpotifyException) and e.http_status == 429:
+                retry_after = getattr(e, "headers", {}) or {}
+                retry_after = retry_after.get("Retry-After", "unknown")
+                rprint(f"[yellow]Spotify rate limit hit — skipping (retry after {retry_after}s).[/yellow]")
+                return []
+        except ImportError:
+            pass
         rprint(f"[yellow]Spotify search error: {e}[/yellow]")
         return []
 
@@ -90,8 +99,13 @@ def search_spotify(
                 genres = artist_data.get("genres", [])
                 if genres:
                     tags.genre = genres[0].title()
-            except Exception:
-                pass
+            except Exception as e:
+                try:
+                    from spotipy.exceptions import SpotifyException
+                    if isinstance(e, SpotifyException) and e.http_status == 429:
+                        rprint("[yellow]Spotify rate limit hit during artist lookup — skipping genres.[/yellow]")
+                except ImportError:
+                    pass
 
         # Higher confidence for first result (most relevant)
         confidence = max(0.5, 0.9 - (i * 0.1))

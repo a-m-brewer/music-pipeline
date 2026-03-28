@@ -79,7 +79,23 @@ def identify_track(
     source_results.extend(spotify_results)
     db.log_api_call("spotify", file_id)
 
-    # --- Stage 4: Brave web search ---
+    # --- Stage 4a: LLM synthesis (without Brave) ---
+    rprint("[dim]  LLM synthesis (pass 1)...[/dim]")
+    llm_result = synthesize_with_llm(
+        file_info=file_info,
+        source_results=source_results,
+        brave_results=[],
+        config=config.llm,
+    )
+
+    if llm_result is not None:
+        result, tokens_used = llm_result
+        db.log_api_call("llm", file_id, tokens_used)
+        if result.confidence >= config.thresholds.auto_approve:
+            rprint(f"[dim]  Skipping web search (confidence {result.confidence} >= {config.thresholds.auto_approve})[/dim]")
+            return _normalize_result(result)
+
+    # --- Stage 4b: Brave web search (confidence too low after pass 1) ---
     rprint("[dim]  Web search...[/dim]")
     brave_results = search_for_track(
         title=search_title,
@@ -89,8 +105,8 @@ def identify_track(
     )
     db.log_api_call("brave", file_id)
 
-    # --- Stage 5: LLM synthesis ---
-    rprint("[dim]  LLM synthesis...[/dim]")
+    # --- Stage 5: LLM synthesis (pass 2, with Brave results) ---
+    rprint("[dim]  LLM synthesis (pass 2)...[/dim]")
     llm_result = synthesize_with_llm(
         file_info=file_info,
         source_results=source_results,
@@ -112,7 +128,19 @@ def _normalize_result(result: IdentificationResult) -> IdentificationResult:
     """Enforce album_artist = single primary artist only (no features/collaborators)."""
     if result.tags.album_artist:
         result.tags.album_artist = extract_primary_artist(result.tags.album_artist)
+    if result.tags.genre:
+        result.tags.genre = _normalize_genre(result.tags.genre)
     return result
+
+
+def _normalize_genre(genre: str) -> str:
+    """Normalize genre separators to comma-separated format.
+
+    Splits on '/' and rejoins with ', '.
+    e.g. "Electronic/House" -> "Electronic, House"
+    """
+    parts = [g.strip() for g in genre.split("/") if g.strip()]
+    return ", ".join(parts)
 
 
 def _fallback_result(
