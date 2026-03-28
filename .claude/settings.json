@@ -15,7 +15,8 @@
       "Bash(python3 -m py_compile music_pipeline/pipeline/spotify.py)",
       "Bash(python3 -m py_compile music_pipeline/pipeline/brave_search.py)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(find /Users/adambrewer/source/github.com/a-m-brewer/music-pipeline -not -path */.* -not -path */.venv/* -not -path */__pycache__/* -not -path *.egg-info* -type f)"
     ]
   }
 }
