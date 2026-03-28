@@ -24,8 +24,8 @@ def _write_id3_tags(audio, tags: TrackTags) -> bool:
         ("TALB", tags.album, TALB),
         ("TPE2", tags.album_artist, TPE2),
         ("TCOM", tags.composer, TCOM),
-        ("TRCK", tags.track_number, TRCK),
-        ("TPOS", tags.disc_number, TPOS),
+        ("TRCK", tags.track_number and str(tags.track_number), TRCK),
+        ("TPOS", tags.disc_number and str(tags.disc_number), TPOS),
     ]
 
     for frame_id, value, frame_cls in tag_mapping:
@@ -83,10 +83,10 @@ def _write_mp4_tags(audio, tags: TrackTags) -> bool:
         t["\xa9gen"] = _parse_genres(tags.genre)
     if tags.comment and tags.comment.strip():
         t["\xa9cmt"] = [tags.comment.strip()]
-    if tags.track_number and tags.track_number.strip():
-        t["trkn"] = [_parse_number_pair(tags.track_number)]
-    if tags.disc_number and tags.disc_number.strip():
-        t["disk"] = [_parse_number_pair(tags.disc_number)]
+    if tags.track_number and str(tags.track_number).strip():
+        t["trkn"] = [_parse_number_pair(str(tags.track_number))]
+    if tags.disc_number and str(tags.disc_number).strip():
+        t["disk"] = [_parse_number_pair(str(tags.disc_number))]
 
     return True
 
@@ -100,8 +100,8 @@ def _write_vorbis_tags(audio, tags: TrackTags) -> bool:
         ("ALBUM", tags.album),
         ("ALBUMARTIST", tags.album_artist),
         ("COMPOSER", tags.composer),
-        ("TRACKNUMBER", tags.track_number),
-        ("DISCNUMBER", tags.disc_number),
+        ("TRACKNUMBER", tags.track_number and str(tags.track_number)),
+        ("DISCNUMBER", tags.disc_number and str(tags.disc_number)),
         ("DATE", tags.year),
         ("COMMENT", tags.comment),
     ]
@@ -122,8 +122,8 @@ def _write_asf_tags(audio, tags: TrackTags) -> bool:
         ("WM/AlbumTitle", tags.album),
         ("WM/AlbumArtist", tags.album_artist),
         ("WM/Composer", tags.composer),
-        ("WM/TrackNumber", tags.track_number),
-        ("WM/PartOfSet", tags.disc_number),
+        ("WM/TrackNumber", tags.track_number and str(tags.track_number)),
+        ("WM/PartOfSet", tags.disc_number and str(tags.disc_number)),
         ("WM/Year", tags.year),
         ("Description", tags.comment),
     ]
