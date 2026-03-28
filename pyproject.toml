@@ -1,0 +1,24 @@
+[project]
+name = "music-pipeline"
+version = "0.1.0"
+description = "AI-powered music organization pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "mutagen>=1.47",
+    "rich>=13.0",
+    "prompt-toolkit>=3.0",
+    "pyacoustid>=1.3",
+    "musicbrainzngs>=0.7",
+    "spotipy>=2.23",
+    "openai>=1.0",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "pygame>=2.5",
+]
+
+[project.scripts]
+music-pipeline = "music_pipeline.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"

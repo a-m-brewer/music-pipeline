@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip3 list:*)",
+      "Bash(python3 -c \"import ast; import glob; errors = []; [errors.append\\(f\\) for f in glob.glob\\(''music_pipeline/**/*.py'', recursive=True\\) if not \\(lambda p: \\(ast.parse\\(open\\(p\\).read\\(\\)\\), True\\)[-1]\\)\\(f\\)]; print\\(''All files parse OK'' if not errors else errors\\)\")",
+      "Bash(python3 -m py_compile music_pipeline/config.py)",
+      "Bash(python3 -m py_compile music_pipeline/models.py)",
+      "Bash(python3 -m py_compile music_pipeline/state/db.py)",
+      "Bash(python3 -m py_compile music_pipeline/utils/paths.py)",
+      "Bash(python3 -m py_compile music_pipeline/tags/reader.py)",
+      "Bash(python3 -m py_compile music_pipeline/tags/writer.py)",
+      "Bash(python3 -m py_compile music_pipeline/pipeline/scanner.py)",
+      "Bash(python3 -m py_compile music_pipeline/pipeline/fingerprint.py)",
+      "Bash(python3 -m py_compile music_pipeline/pipeline/musicbrainz.py)",
+      "Bash(python3 -m py_compile music_pipeline/pipeline/spotify.py)",
+      "Bash(python3 -m py_compile music_pipeline/pipeline/brave_search.py)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

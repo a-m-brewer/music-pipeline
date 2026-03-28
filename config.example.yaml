@@ -1,0 +1,23 @@
+paths:
+  source: /Volumes/Media/Music Old
+  destination: /Volumes/Media/yams/media/music
+  discard: /Volumes/Media/Music Discard
+
+api_keys:
+  acoustid: ${ACOUSTID_API_KEY}
+  spotify_client_id: ${SPOTIFY_CLIENT_ID}
+  spotify_client_secret: ${SPOTIFY_CLIENT_SECRET}
+  brave: ${BRAVE_API_KEY}
+
+llm:
+  base_url: https://api.openai.com/v1  # Any OpenAI-compatible endpoint
+  api_key: ${LLM_API_KEY}
+  model: gpt-4o  # or claude-sonnet-4-20250514, local model, etc.
+
+thresholds:
+  auto_approve: 90   # 90-100: auto-approve, tags applied and file moved
+  quick_review: 70   # 70-89: quick Y/N review. Below 70: full manual review
+
+naming:
+  file_pattern: "{track_number} - {title} - {album} - {album_artist}"
+  dir_pattern: "{album_artist_initial}/{album_artist}/{album}"
