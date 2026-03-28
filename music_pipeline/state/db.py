@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from collections.abc import Generator
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
@@ -100,8 +101,38 @@ class StateDB:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_non_pending_paths(self) -> set[str]:
+        """Return paths of all files that are NOT pending (already processed or errored)."""
+        rows = self.conn.execute(
+            "SELECT file_path FROM files WHERE status != ?", (FileStatus.PENDING,)
+        ).fetchall()
+        return {row["file_path"] for row in rows}
+
+    def add_files_batch(self, file_paths: list[str]) -> None:
+        """Add multiple files in a single transaction. Skips already-existing paths."""
+        now = self._now()
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO files (file_path, status, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            [(p, FileStatus.PENDING, now, now) for p in file_paths],
+        )
+        self.conn.commit()
+
+    def count_pending(self) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) as count FROM files WHERE status = ?", (FileStatus.PENDING,)
+        ).fetchone()
+        return row["count"]
+
     def get_pending_files(self) -> list[dict]:
         return self.get_files_by_status(FileStatus.PENDING)
+
+    def iter_pending_files(self) -> Generator[dict, None, None]:
+        """Stream pending files from DB without loading all into memory."""
+        cursor = self.conn.execute(
+            "SELECT * FROM files WHERE status = ? ORDER BY id", (FileStatus.PENDING,)
+        )
+        for row in cursor:
+            yield dict(row)
 
     def get_identified_files(self) -> list[dict]:
         return self.get_files_by_status(FileStatus.IDENTIFIED)

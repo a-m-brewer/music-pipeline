@@ -16,7 +16,9 @@ SYSTEM_PROMPT = """You are a music identification assistant. Your job is to dete
 
 You specialize in electronic music, DJ culture, and obscure tracks that may not appear in mainstream databases. You understand that filenames, folder names, and partial tags can all provide valuable clues.
 
-Always respond with valid JSON matching the specified schema. Be conservative with confidence scores — only rate highly when multiple sources agree or you have strong evidence."""
+Always respond with valid JSON matching the specified schema. Be conservative with confidence scores — only rate highly when multiple sources agree or you have strong evidence.
+
+For artist tagging: `artist` holds full performing credits (e.g. "Artist A & Artist B", "Artist A feat. Artist B"). `album_artist` holds only the single primary/lead artist and is used for folder organisation — never include collaborators or features here."""
 
 USER_PROMPT_TEMPLATE = """Identify this audio file and determine the correct metadata tags.
 
@@ -43,12 +45,16 @@ USER_PROMPT_TEMPLATE = """Identify this audio file and determine the correct met
 
 Based on ALL available information, determine the most likely correct tags. Cross-reference sources where possible. If sources disagree, explain why you chose one over another.
 
+**Artist field rules (important):**
+- `artist`: full performing credits, including all collaborators (e.g. "Artist A & Artist B", "Artist A feat. Artist B")
+- `album_artist`: the single primary artist only — used for folder organisation. Never include featured/secondary artists here. If the track has multiple artists, pick the most prominent one.
+
 Respond with ONLY valid JSON (no markdown code fences):
 {{
   "title": "track title or null",
-  "artist": "artist name or null",
+  "artist": "full artist credits including all collaborators, or null",
   "album": "album name or null",
-  "album_artist": "album artist or null",
+  "album_artist": "primary artist only (no features/collaborators), or null",
   "year": "release year or null",
   "track_number": "track number or null",
   "genre": "genre or null",

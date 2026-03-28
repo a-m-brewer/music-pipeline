@@ -20,17 +20,9 @@ FILENAME_PATTERNS = [
 ]
 
 
-def read_tags(file_path: str) -> Optional[TrackTags]:
-    """Read ID3 tags from an audio file. Returns None if file can't be read."""
-    try:
-        audio = File(file_path)
-    except (HeaderNotFoundError, Exception):
-        return None
-
-    if audio is None or audio.tags is None:
-        return TrackTags()
-
-    if not isinstance(audio.tags, ID3Tags):
+def _extract_tags(audio) -> TrackTags:
+    """Extract TrackTags from an already-opened mutagen File object."""
+    if audio.tags is None or not isinstance(audio.tags, ID3Tags):
         return TrackTags()
 
     def get_tag(frame_id: str) -> Optional[str]:
@@ -52,6 +44,19 @@ def read_tags(file_path: str) -> Optional[TrackTags]:
         composer=get_tag("TCOM"),
         disc_number=get_tag("TPOS"),
     )
+
+
+def read_tags(file_path: str) -> Optional[TrackTags]:
+    """Read ID3 tags from an audio file. Returns None if file can't be read."""
+    try:
+        audio = File(file_path)
+    except (HeaderNotFoundError, Exception):
+        return None
+
+    if audio is None:
+        return None
+
+    return _extract_tags(audio)
 
 
 def get_duration(file_path: str) -> Optional[float]:
@@ -110,8 +115,8 @@ def build_file_info(file_path: str) -> Optional[FileInfo]:
     if audio is None:
         return None
 
-    existing_tags = read_tags(file_path)
-    duration = get_duration(file_path)
+    existing_tags = _extract_tags(audio)
+    duration = audio.info.length if audio.info else None
 
     return FileInfo(
         file_path=file_path,

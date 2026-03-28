@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Setup
 
 ```bash
-pip install -e .
+just setup
 brew install chromaprint          # for AcoustID audio fingerprinting (optional but recommended)
 cp config.example.yaml config.yaml  # then fill in API keys
 ```
@@ -13,19 +13,14 @@ cp config.example.yaml config.yaml  # then fill in API keys
 ## Running
 
 ```bash
-# Full pipeline (identify + move)
-python -m music_pipeline.main
+just          # full pipeline (identify + move)
+just scan     # identify without moving files
+just review   # review previously identified files
+just stats    # show statistics
+```
 
-# Identify without moving files
-python -m music_pipeline.main --scan-only
-
-# Review previously identified files
-python -m music_pipeline.main --review
-
-# Show statistics
-python -m music_pipeline.main --stats
-
-# Override config values at runtime
+Or directly:
+```bash
 python -m music_pipeline.main --threshold 80 --source /path/to/music
 ```
 

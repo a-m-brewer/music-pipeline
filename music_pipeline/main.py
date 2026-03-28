@@ -4,15 +4,15 @@ import argparse
 import os
 import sys
 
-import pygame
 from prompt_toolkit import PromptSession
 from rich import print as rprint
-from rich.prompt import Confirm
 
+from music_pipeline import audio
 from music_pipeline.config import Config, load_config
 from music_pipeline.models import IdentificationResult, TrackTags
 from music_pipeline.pipeline.identifier import identify_track
-from music_pipeline.pipeline.scanner import scan_source
+from music_pipeline.pipeline.scanner import scan_paths
+from music_pipeline.tags.reader import build_file_info
 from music_pipeline.state.db import FileStatus, StateDB
 from music_pipeline.tags.writer import move_file, write_tags
 from music_pipeline.ui.terminal import (
@@ -35,6 +35,7 @@ def parse_args():
     parser.add_argument("--destination", type=str, help="Override destination directory")
     parser.add_argument("--threshold", type=int, help="Override auto-approve threshold")
     parser.add_argument("--db", type=str, default="pipeline_state.db", help="Path to state database")
+    parser.add_argument("--limit", type=int, help="Max files to process this session (for chunking large libraries)")
     return parser.parse_args()
 
 
@@ -59,14 +60,12 @@ def process_file(
     is_discard: bool = False,
 ):
     """Apply tags and move a file to its destination."""
-    # Write tags
     rprint("[dim]Writing tags...[/dim]")
     if not write_tags(file_info.file_path, tags):
         rprint("[red]Failed to write tags.[/red]")
         db.update_status(file_info.file_path, FileStatus.ERROR)
         return
 
-    # Determine destination
     if is_discard:
         dest_dir, dest_path = build_discard_path(
             config.paths.discard, tags, file_info.extension
@@ -78,9 +77,13 @@ def process_file(
         )
         status = FileStatus.MOVED
 
-    # Move file
     rprint(f"[dim]Moving to: {dest_path}[/dim]")
-    actual_path = move_file(file_info.file_path, dest_dir, dest_path)
+    try:
+        actual_path = move_file(file_info.file_path, dest_dir, dest_path)
+    except PermissionError as e:
+        rprint(f"[red]Permission denied moving file: {e}[/red]")
+        db.update_status(file_info.file_path, FileStatus.PENDING)
+        return
     db.save_destination(file_info.file_path, actual_path)
     db.update_status(file_info.file_path, status)
     rprint(f"[green]Done: {actual_path}[/green]")
@@ -99,18 +102,15 @@ def handle_review(
         action, edited_tags = prompt_review(file_info, result, session)
 
         if action == ReviewAction.PLAY:
-            try:
-                pygame.mixer.music.load(file_info.file_path)
-                pygame.mixer.music.play(start=0.0)
-            except Exception as e:
-                rprint(f"[red]Playback error: {e}[/red]")
+            audio.play(file_info.file_path)
             continue
 
         if action == ReviewAction.STOP:
-            pygame.mixer.music.stop()
+            audio.stop()
             continue
 
         if action == ReviewAction.QUIT:
+            audio.stop()
             return False
 
         if action == ReviewAction.SKIP:
@@ -118,6 +118,7 @@ def handle_review(
             return True
 
         if action == ReviewAction.APPROVE:
+            audio.stop()
             if scan_only:
                 db.update_status(file_info.file_path, FileStatus.APPROVED)
             else:
@@ -128,9 +129,10 @@ def handle_review(
             if edited_tags:
                 result.tags = edited_tags
                 display_identification(file_info, result)
-                continue
+            continue
 
         if action == ReviewAction.DISCARD:
+            audio.stop()
             if scan_only:
                 db.update_status(file_info.file_path, FileStatus.DISCARDED)
             else:
@@ -140,65 +142,75 @@ def handle_review(
     return True
 
 
-def run_pipeline(config: Config, db: StateDB, scan_only: bool = False):
+def run_pipeline(config: Config, db: StateDB, scan_only: bool = False, limit: int | None = None):
     """Main pipeline: scan, identify, review, and move files."""
     rprint("[bold]Scanning source directory...[/bold]")
 
-    # Register all files first
-    file_infos = []
-    for file_info in scan_source(config.paths.source):
-        db.add_file(file_info.file_path)
-        file_infos.append(file_info)
+    # Load non-pending paths once so we skip them during the fast path scan.
+    # This avoids opening any file that's already been processed.
+    skip = db.get_non_pending_paths()
 
-    total = len(file_infos)
-    rprint(f"[bold]Found {total} audio files.[/bold]")
+    batch: list[str] = []
+    _BATCH_SIZE = 500
+    for file_path in scan_paths(config.paths.source, skip=skip):
+        batch.append(file_path)
+        if len(batch) >= _BATCH_SIZE:
+            db.add_files_batch(batch)
+            batch.clear()
+    if batch:
+        db.add_files_batch(batch)
 
-    # Filter to only pending files
-    pending_paths = {f["file_path"] for f in db.get_pending_files()}
-    file_infos = [f for f in file_infos if f.file_path in pending_paths]
-    rprint(f"[bold]{len(file_infos)} files need processing.[/bold]")
+    total = db.count_pending()
+    rprint(f"[bold]{total} files need processing.[/bold]")
 
-    if not file_infos:
+    if not total:
         rprint("[green]All files have been processed![/green]")
         return
 
-    pygame.mixer.init()
-    session = PromptSession()
-    processed = total - len(file_infos)
+    processed = 0
 
-    for file_info in file_infos:
+    for record in db.iter_pending_files():
+        if limit is not None and processed >= limit:
+            rprint(f"[yellow]Session limit of {limit} files reached.[/yellow]")
+            break
+
+        file_path = record["file_path"]
+
+        if not os.path.exists(file_path):
+            rprint(f"[yellow]File no longer exists: {file_path}[/yellow]")
+            db.update_status(file_path, FileStatus.ERROR)
+            continue
+
+        file_info = build_file_info(file_path)
+        if not file_info:
+            db.update_status(file_path, FileStatus.ERROR)
+            continue
+
         processed += 1
         display_progress(processed, total)
 
-        rprint(f"\n[bold]Identifying:[/bold] {os.path.basename(file_info.file_path)}")
+        rprint(f"\n[bold]Identifying:[/bold] {os.path.basename(file_path)}")
 
         result = identify_track(file_info, config, db)
 
         if result is None:
             rprint("[yellow]Could not identify this file.[/yellow]")
-            db.update_status(file_info.file_path, FileStatus.ERROR)
+            db.update_status(file_path, FileStatus.ERROR)
             continue
 
-        # Save identification to DB
-        db.save_identification(file_info.file_path, result)
+        db.save_identification(file_path, result)
 
-        # Check auto-approve threshold
         if result.confidence >= config.thresholds.auto_approve and not result.is_dj_mix:
             display_identification(file_info, result, auto_approved=True)
             if not scan_only:
                 process_file(file_info, result, result.tags, config, db)
             else:
-                db.update_status(file_info.file_path, FileStatus.APPROVED)
+                db.update_status(file_path, FileStatus.APPROVED)
             continue
 
-        # Show result and prompt for review
-        display_identification(file_info, result)
+        display_identification(file_info, result, queued_for_review=True)
+        rprint("[yellow]Confidence below threshold — queued for review. Run `just review` when ready.[/yellow]")
 
-        if not handle_review(file_info, result, config, db, session, scan_only):
-            rprint("[bold]Bye...[/bold]")
-            break
-
-    pygame.mixer.quit()
     rprint("\n[bold green]Session complete.[/bold green]")
     display_stats(db.get_stats())
 
@@ -212,7 +224,6 @@ def run_review(config: Config, db: StateDB):
 
     rprint(f"[bold]{len(identified)} files pending review.[/bold]")
 
-    pygame.mixer.init()
     session = PromptSession()
 
     for record in identified:
@@ -237,7 +248,6 @@ def run_review(config: Config, db: StateDB):
             rprint("[bold]Bye...[/bold]")
             break
 
-    pygame.mixer.quit()
     display_stats(db.get_stats())
 
 
@@ -250,7 +260,6 @@ def main():
         rprint(f"[red]{e}[/red]")
         sys.exit(1)
 
-    # Apply CLI overrides
     if args.source:
         config.paths.source = args.source
     if args.destination:
@@ -268,7 +277,7 @@ def main():
             run_review(config, db)
         else:
             validate_paths(config)
-            run_pipeline(config, db, scan_only=args.scan_only)
+            run_pipeline(config, db, scan_only=args.scan_only, limit=args.limit)
     finally:
         db.close()
 

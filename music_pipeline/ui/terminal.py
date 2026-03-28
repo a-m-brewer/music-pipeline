@@ -25,6 +25,7 @@ def display_identification(
     file_info: FileInfo,
     result: IdentificationResult,
     auto_approved: bool = False,
+    queued_for_review: bool = False,
 ):
     """Display the identification result for a file."""
     # Confidence color
@@ -35,7 +36,12 @@ def display_identification(
     else:
         conf_color = "red"
 
-    status = "[bold green]AUTO-APPROVED[/bold green]" if auto_approved else ""
+    if auto_approved:
+        status = "[bold green]AUTO-APPROVED[/bold green]"
+    elif queued_for_review:
+        status = "[bold yellow]QUEUED FOR REVIEW[/bold yellow]"
+    else:
+        status = ""
 
     rprint()
     rprint(
@@ -163,11 +169,19 @@ def display_stats(stats: dict):
     table.add_column("Status", style="cyan")
     table.add_column("Count", style="magenta", justify="right")
 
-    status_order = ["pending", "identified", "approved", "moved", "discarded", "skipped", "error"]
-    for status in status_order:
+    status_labels = {
+        "pending": "Pending",
+        "identified": "Queued for Review",
+        "approved": "Approved",
+        "moved": "Moved",
+        "discarded": "Discarded",
+        "skipped": "Skipped",
+        "error": "Error",
+    }
+    for status, label in status_labels.items():
         count = stats.get(status, 0)
         if count > 0:
-            table.add_row(status.title(), str(count))
+            table.add_row(label, str(count))
 
     total = stats.get("total", 0)
     table.add_row("[bold]Total[/bold]", f"[bold]{total}[/bold]")
