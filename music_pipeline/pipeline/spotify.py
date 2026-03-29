@@ -21,7 +21,7 @@ def _get_client(client_id: Optional[str], client_secret: Optional[str]):
         auth_manager = SpotifyClientCredentials(
             client_id=client_id, client_secret=client_secret
         )
-        return spotipy.Spotify(auth_manager=auth_manager)
+        return spotipy.Spotify(auth_manager=auth_manager, retries=0, status_retries=0)
     except Exception as e:
         rprint(f"[yellow]Spotify auth error: {e}[/yellow]")
         return None

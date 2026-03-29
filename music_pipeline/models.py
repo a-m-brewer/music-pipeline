@@ -59,3 +59,5 @@ class IdentificationResult:
     is_dj_mix: bool = False
     sources_used: list[str] = field(default_factory=list)
     source_results: list[SourceResult] = field(default_factory=list)
+    # In-memory only: LLM message history for multi-turn clarification
+    conversation_history: Optional[list] = None

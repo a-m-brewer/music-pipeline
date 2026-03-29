@@ -34,9 +34,10 @@ def _write_id3_tags(audio, tags: TrackTags) -> bool:
             frame.text = [value.strip()]
             audio.tags.setall(frame_id, [frame])
 
-    if tags.year and tags.year.strip():
+    year_str = str(tags.year) if tags.year is not None else None
+    if year_str and year_str.strip():
         tdrc = TDRC()
-        tdrc.text = [tags.year.strip()]
+        tdrc.text = [year_str.strip()]
         audio.tags.setall("TDRC", [tdrc])
 
     if tags.genre and tags.genre.strip():
@@ -77,8 +78,8 @@ def _write_mp4_tags(audio, tags: TrackTags) -> bool:
         t["aART"] = [tags.album_artist.strip()]
     if tags.composer and tags.composer.strip():
         t["\xa9wrt"] = [tags.composer.strip()]
-    if tags.year and tags.year.strip():
-        t["\xa9day"] = [tags.year.strip()]
+    if tags.year and str(tags.year).strip():
+        t["\xa9day"] = [str(tags.year).strip()]
     if tags.genre and tags.genre.strip():
         t["\xa9gen"] = _parse_genres(tags.genre)
     if tags.comment and tags.comment.strip():
@@ -102,7 +103,7 @@ def _write_vorbis_tags(audio, tags: TrackTags) -> bool:
         ("COMPOSER", tags.composer),
         ("TRACKNUMBER", tags.track_number and str(tags.track_number)),
         ("DISCNUMBER", tags.disc_number and str(tags.disc_number)),
-        ("DATE", tags.year),
+        ("DATE", str(tags.year) if tags.year is not None else None),
         ("COMMENT", tags.comment),
     ]
     for key, value in mapping:
@@ -124,7 +125,7 @@ def _write_asf_tags(audio, tags: TrackTags) -> bool:
         ("WM/Composer", tags.composer),
         ("WM/TrackNumber", tags.track_number and str(tags.track_number)),
         ("WM/PartOfSet", tags.disc_number and str(tags.disc_number)),
-        ("WM/Year", tags.year),
+        ("WM/Year", str(tags.year) if tags.year is not None else None),
         ("Description", tags.comment),
     ]
     for key, value in mapping:

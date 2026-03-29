@@ -31,3 +31,6 @@ review:
 
 stats:
     {{python}} -m music_pipeline.main --stats
+
+batch-approve MIN="85":
+    {{python}} -m music_pipeline.main --batch-approve {{MIN}}

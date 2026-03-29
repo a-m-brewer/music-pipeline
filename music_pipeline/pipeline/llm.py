@@ -122,13 +122,15 @@ def synthesize_with_llm(
         brave_results=format_search_results(brave_results),
     )
 
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+    ]
+
     try:
         response = client.chat.completions.create(
             model=config.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
+            messages=messages,
             temperature=0.2,
         )
     except Exception as e:
@@ -166,11 +168,109 @@ def synthesize_with_llm(
     if response.usage:
         tokens_used = response.usage.total_tokens
 
-    return IdentificationResult(
+    result = IdentificationResult(
         tags=tags,
         confidence=data.get("confidence", 0),
         reasoning=data.get("reasoning", ""),
         is_dj_mix=data.get("is_dj_mix", False),
         sources_used=data.get("sources_used", []),
         source_results=source_results,
-    ), tokens_used
+        conversation_history=messages + [{"role": "assistant", "content": content}],
+    )
+    return result, tokens_used
+
+
+def clarify_with_llm(
+    result: IdentificationResult,
+    user_message: str,
+    config: LlmConfig,
+) -> Optional[tuple[IdentificationResult, int]]:
+    """Continue the LLM conversation with a user clarification message."""
+    if not config.api_key:
+        rprint("[yellow]No LLM API key configured — skipping clarification.[/yellow]")
+        return None
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        rprint("[yellow]openai package not installed — skipping clarification.[/yellow]")
+        return None
+
+    client = OpenAI(base_url=config.base_url, api_key=config.api_key)
+
+    if result.conversation_history:
+        messages = result.conversation_history + [{"role": "user", "content": user_message}]
+    else:
+        # Reconstruct context from saved result (e.g. loaded from DB without history)
+        prev_response = json.dumps({
+            "title": result.tags.title,
+            "artist": result.tags.artist,
+            "album": result.tags.album,
+            "album_artist": result.tags.album_artist,
+            "year": result.tags.year,
+            "track_number": result.tags.track_number,
+            "genre": result.tags.genre,
+            "composer": result.tags.composer,
+            "disc_number": result.tags.disc_number,
+            "confidence": result.confidence,
+            "is_dj_mix": result.is_dj_mix,
+            "reasoning": result.reasoning,
+            "sources_used": result.sources_used,
+        })
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": "Please identify this audio file."},
+            {"role": "assistant", "content": prev_response},
+            {"role": "user", "content": user_message},
+        ]
+
+    try:
+        response = client.chat.completions.create(
+            model=config.model,
+            messages=messages,
+            temperature=0.2,
+        )
+    except Exception as e:
+        rprint(f"[red]LLM API error: {e}[/red]")
+        return None
+
+    content = response.choices[0].message.content.strip()
+
+    if content.startswith("```"):
+        lines = content.split("\n")
+        lines = [l for l in lines if not l.startswith("```")]
+        content = "\n".join(lines)
+
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as e:
+        rprint(f"[red]LLM returned invalid JSON: {e}[/red]")
+        rprint(f"[dim]{content}[/dim]")
+        return None
+
+    tags = TrackTags(
+        title=data.get("title"),
+        artist=data.get("artist"),
+        album=data.get("album"),
+        album_artist=data.get("album_artist"),
+        year=data.get("year"),
+        track_number=data.get("track_number"),
+        genre=data.get("genre"),
+        composer=data.get("composer"),
+        disc_number=data.get("disc_number"),
+    )
+
+    tokens_used = 0
+    if response.usage:
+        tokens_used = response.usage.total_tokens
+
+    new_result = IdentificationResult(
+        tags=tags,
+        confidence=data.get("confidence", 0),
+        reasoning=data.get("reasoning", ""),
+        is_dj_mix=data.get("is_dj_mix", False),
+        sources_used=data.get("sources_used", []),
+        source_results=result.source_results,
+        conversation_history=messages + [{"role": "assistant", "content": content}],
+    )
+    return new_result, tokens_used

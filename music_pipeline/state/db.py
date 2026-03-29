@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Optional
 
-from music_pipeline.models import IdentificationResult, TrackTags
+from music_pipeline.models import IdentificationResult, SourceResult, TrackTags
 
 
 class FileStatus(StrEnum):
@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS files (
     confidence INTEGER,
     identified_tags TEXT,
     sources_used TEXT,
+    source_results TEXT,
     reasoning TEXT,
     destination_path TEXT,
     created_at TEXT NOT NULL,
@@ -57,7 +58,12 @@ class StateDB:
 
     def _init_schema(self):
         self.conn.executescript(SCHEMA)
-        self.conn.commit()
+        # Migrate existing DBs that predate the source_results column
+        try:
+            self.conn.execute("ALTER TABLE files ADD COLUMN source_results TEXT")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
     def close(self):
         self.conn.close()
@@ -135,7 +141,24 @@ class StateDB:
             yield dict(row)
 
     def get_identified_files(self) -> list[dict]:
-        return self.get_files_by_status(FileStatus.IDENTIFIED)
+        rows = self.conn.execute(
+            "SELECT * FROM files WHERE status = ? ORDER BY confidence DESC, id ASC",
+            (FileStatus.IDENTIFIED,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_album_siblings(self, album: str, album_artist: str, exclude_path: str) -> list[dict]:
+        """Return identified files for the same album/album_artist, excluding the current file."""
+        rows = self.conn.execute(
+            """SELECT * FROM files
+               WHERE status = ?
+                 AND file_path != ?
+                 AND LOWER(json_extract(identified_tags, '$.album')) = LOWER(?)
+                 AND LOWER(json_extract(identified_tags, '$.album_artist')) = LOWER(?)
+               ORDER BY json_extract(identified_tags, '$.track_number'), id""",
+            (FileStatus.IDENTIFIED, exclude_path, album, album_artist)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def update_status(self, file_path: str, status: FileStatus):
         self.conn.execute(
@@ -148,12 +171,17 @@ class StateDB:
         self, file_path: str, result: IdentificationResult
     ):
         """Save identification result for a file."""
+        source_results_json = json.dumps([
+            {"source": r.source, "confidence": r.confidence, "tags": r.tags.to_dict()}
+            for r in result.source_results
+        ])
         self.conn.execute(
             """UPDATE files SET
                 status = ?,
                 confidence = ?,
                 identified_tags = ?,
                 sources_used = ?,
+                source_results = ?,
                 reasoning = ?,
                 updated_at = ?
             WHERE file_path = ?""",
@@ -162,6 +190,7 @@ class StateDB:
                 result.confidence,
                 json.dumps(result.tags.to_dict()),
                 json.dumps(result.sources_used),
+                source_results_json,
                 result.reasoning,
                 self._now(),
                 file_path,
@@ -184,12 +213,22 @@ class StateDB:
 
         tags_dict = json.loads(row["identified_tags"])
         sources = json.loads(row["sources_used"]) if row.get("sources_used") else []
+        source_results_raw = json.loads(row["source_results"]) if row.get("source_results") else []
+        source_results = [
+            SourceResult(
+                source=sr["source"],
+                confidence=sr["confidence"],
+                tags=TrackTags(**sr["tags"]),
+            )
+            for sr in source_results_raw
+        ]
 
         return IdentificationResult(
             tags=TrackTags(**tags_dict),
             confidence=row.get("confidence", 0),
             reasoning=row.get("reasoning", ""),
             sources_used=sources,
+            source_results=source_results,
         )
 
     # --- API call tracking ---

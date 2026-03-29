@@ -11,10 +11,13 @@ from music_pipeline import audio
 from music_pipeline.config import Config, load_config
 from music_pipeline.models import IdentificationResult, TrackTags
 from music_pipeline.pipeline.identifier import identify_track
+from music_pipeline.pipeline.llm import clarify_with_llm
 from music_pipeline.pipeline.scanner import scan_paths
 from music_pipeline.tags.reader import build_file_info
 from music_pipeline.state.db import FileStatus, StateDB
 from music_pipeline.tags.writer import move_file, write_tags
+from rich.prompt import Confirm
+
 from music_pipeline.ui.terminal import (
     ReviewAction,
     display_identification,
@@ -36,6 +39,8 @@ def parse_args():
     parser.add_argument("--threshold", type=int, help="Override auto-approve threshold")
     parser.add_argument("--db", type=str, default="pipeline_state.db", help="Path to state database")
     parser.add_argument("--limit", type=int, help="Max files to process this session (for chunking large libraries)")
+    parser.add_argument("--batch-approve", type=int, metavar="MIN_CONFIDENCE",
+        help="Non-interactively approve all identified files with confidence >= N")
     return parser.parse_args()
 
 
@@ -89,6 +94,58 @@ def process_file(
     rprint(f"[green]Done: {actual_path}[/green]")
 
 
+def _offer_album_batch(
+    file_info,
+    result: IdentificationResult,
+    config: Config,
+    db: StateDB,
+    session: PromptSession,
+    scan_only: bool,
+):
+    """After approving/discarding a track, offer to batch-approve siblings from the same album."""
+    album = result.tags.album
+    album_artist = result.tags.album_artist
+    if not album or not album_artist:
+        return
+
+    siblings = db.get_album_siblings(album, album_artist, file_info.file_path)
+    if not siblings:
+        return
+
+    rprint(f"\n[bold]{len(siblings)} other track(s) from [cyan]{album}[/cyan] by [cyan]{album_artist}[/cyan] queued:[/bold]")
+    for sib in siblings:
+        import json as _json
+        tags = _json.loads(sib["identified_tags"]) if sib.get("identified_tags") else {}
+        track = tags.get("track_number") or "??"
+        title = tags.get("title") or os.path.basename(sib["file_path"])
+        rprint(f"  [dim]{str(track).zfill(2)} — {title}[/dim]")
+
+    if not Confirm.ask(f"Approve all {len(siblings)} tracks?", default=False):
+        return
+
+    approved = 0
+    for sib in siblings:
+        sib_path = sib["file_path"]
+        if not os.path.exists(sib_path):
+            rprint(f"[yellow]  Missing: {sib_path}[/yellow]")
+            db.update_status(sib_path, FileStatus.ERROR)
+            continue
+        from music_pipeline.tags.reader import build_file_info as _build
+        sib_info = _build(sib_path)
+        if not sib_info:
+            continue
+        sib_result = db.load_identification(sib_path)
+        if not sib_result:
+            continue
+        if scan_only:
+            db.update_status(sib_path, FileStatus.APPROVED)
+        else:
+            process_file(sib_info, sib_result, sib_result.tags, config, db)
+        approved += 1
+
+    rprint(f"[green]Batch approved {approved} track(s).[/green]")
+
+
 def handle_review(
     file_info,
     result: IdentificationResult,
@@ -117,12 +174,17 @@ def handle_review(
             db.update_status(file_info.file_path, FileStatus.SKIPPED)
             return True
 
+        if action == ReviewAction.COMPACT_VIEW:
+            display_identification(file_info, result)
+            continue
+
         if action == ReviewAction.APPROVE:
             audio.stop()
             if scan_only:
                 db.update_status(file_info.file_path, FileStatus.APPROVED)
             else:
                 process_file(file_info, result, result.tags, config, db)
+            _offer_album_batch(file_info, result, config, db, session, scan_only)
             return True
 
         if action == ReviewAction.EDIT:
@@ -131,15 +193,85 @@ def handle_review(
                 display_identification(file_info, result)
             continue
 
+        if action == ReviewAction.USE_SOURCE:
+            if edited_tags:
+                result.tags = edited_tags
+                display_identification(file_info, result)
+            continue
+
+        if action == ReviewAction.CLARIFY:
+            rprint("\n[bold cyan]Clarify for LLM[/bold cyan] (e.g. 'it's option 2', 'the artist is actually X'):")
+            user_message = session.prompt("  > ").strip()
+            if user_message:
+                rprint("[dim]Asking LLM...[/dim]")
+                clarify_result = clarify_with_llm(result, user_message, config.llm)
+                if clarify_result:
+                    new_result, tokens = clarify_result
+                    file_record = db.get_file(file_info.file_path)
+                    file_id = file_record["id"] if file_record else None
+                    db.log_api_call("llm_clarify", file_id, tokens)
+                    db.save_identification(file_info.file_path, new_result)
+                    result = new_result
+                    display_identification(file_info, result)
+                else:
+                    rprint("[yellow]Clarification failed — LLM unavailable.[/yellow]")
+            continue
+
         if action == ReviewAction.DISCARD:
             audio.stop()
             if scan_only:
                 db.update_status(file_info.file_path, FileStatus.DISCARDED)
             else:
                 process_file(file_info, result, result.tags, config, db, is_discard=True)
+            _offer_album_batch(file_info, result, config, db, session, scan_only)
             return True
 
     return True
+
+
+def run_batch_approve(config: Config, db: StateDB, min_confidence: int, scan_only: bool = False):
+    """Non-interactively approve all identified files at or above min_confidence."""
+    identified = db.get_identified_files()
+    candidates = [r for r in identified if (r.get("confidence") or 0) >= min_confidence]
+
+    if not candidates:
+        rprint(f"[green]No identified files with confidence >= {min_confidence}%.[/green]")
+        return
+
+    rprint(f"[bold]{len(candidates)} file(s) with confidence >= {min_confidence}%:[/bold]")
+    for r in candidates[:10]:
+        import json as _json
+        tags = _json.loads(r["identified_tags"]) if r.get("identified_tags") else {}
+        title = tags.get("title") or os.path.basename(r["file_path"])
+        artist = tags.get("artist") or "?"
+        rprint(f"  [dim]{r['confidence']}%[/dim]  {artist} — {title}")
+    if len(candidates) > 10:
+        rprint(f"  [dim]... and {len(candidates) - 10} more[/dim]")
+
+    if not Confirm.ask(f"\nApprove all {len(candidates)} files?", default=False):
+        rprint("[yellow]Cancelled.[/yellow]")
+        return
+
+    approved = 0
+    for record in candidates:
+        file_path = record["file_path"]
+        if not os.path.exists(file_path):
+            rprint(f"[yellow]Missing: {file_path}[/yellow]")
+            db.update_status(file_path, FileStatus.ERROR)
+            continue
+        file_info = build_file_info(file_path)
+        if not file_info:
+            continue
+        result = db.load_identification(file_path)
+        if not result:
+            continue
+        if scan_only:
+            db.update_status(file_path, FileStatus.APPROVED)
+        else:
+            process_file(file_info, result, result.tags, config, db)
+        approved += 1
+
+    rprint(f"[bold green]Batch approved {approved} file(s).[/bold green]")
 
 
 def run_pipeline(config: Config, db: StateDB, scan_only: bool = False, limit: int | None = None):
@@ -228,6 +360,12 @@ def run_review(config: Config, db: StateDB):
 
     for record in identified:
         file_path = record["file_path"]
+
+        # Skip files already processed by a batch operation during this session
+        current = db.get_file(file_path)
+        if not current or current["status"] != FileStatus.IDENTIFIED:
+            continue
+
         if not os.path.exists(file_path):
             rprint(f"[yellow]File no longer exists: {file_path}[/yellow]")
             db.update_status(file_path, FileStatus.ERROR)
@@ -272,6 +410,9 @@ def main():
     try:
         if args.stats:
             display_stats(db.get_stats())
+        elif args.batch_approve:
+            validate_paths(config)
+            run_batch_approve(config, db, args.batch_approve, scan_only=args.scan_only)
         elif args.review:
             validate_paths(config)
             run_review(config, db)
